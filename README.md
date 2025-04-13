@@ -1,7 +1,7 @@
 # MLP Exploration
 
 ## Installation
-After cloning the repository, and creating a virtual environment, install the following dependencies
+After cloning the repository, perform the following actions to run the code:
 
 1. **Creating Virtual Environment**
 
