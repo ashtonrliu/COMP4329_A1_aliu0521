@@ -81,3 +81,4 @@ output_transformation = {
     "softmax": softmax,
     "softmax_shifted": softmax_shifted
 }
+
