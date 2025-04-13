@@ -1,10 +1,8 @@
 from utils.functions import activation_functions, activation_primes, training_error, output_transformation
-import random
 import numpy as np
 
-
 class Model:
-    def __init__(self, activation="relu", error="cross_entropy", output_transform="softmax_shifted", i_size=128, h1_size=92, h2_size=68, o_size=10, learning_rate=0.01, weight_decay=0.02, momentum=0.9):
+    def __init__(self, activation="relu", error="cross_entropy", output_transform="softmax_shifted", *, i_size=128, h1_size=92, h2_size=68, o_size=10, learning_rate=0.01, weight_decay=0.02, momentum=0.9, dropout_rate=0.5):
         # Default Heuristic for hidden layer size
         # h1_size = (i_size + o_size) * 2/3 = 138 * 2/3 = 92
         # h2_size = (h1_size + o_size ) * 2/3 = 68
@@ -25,29 +23,59 @@ class Model:
         self.w_output = np.random.uniform(low=-1, high=1, size=(h2_size, o_size)) 
         self.b_output = np.zeros(o_size)
 
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.momentum = momentum
+        self.learning_rate = learning_rate 
+        self.weight_decay = weight_decay # Set to 0 to turn off
+        self.momentum = momentum # Set to 0 to turn off
+        self.dropout_rate = dropout_rate
 
-    def forward(self, x):
+
+        self.v_w_hidden_1 = np.zeros_like(self.w_hidden_1)
+        self.v_b_hidden_1 = np.zeros_like(self.b_hidden_1)
+        self.v_w_hidden_2 = np.zeros_like(self.w_hidden_2)
+        self.v_b_hidden_2 = np.zeros_like(self.b_hidden_2)
+        self.v_w_output   = np.zeros_like(self.w_output)
+        self.v_b_output   = np.zeros_like(self.b_output)
+
+    def forward(self, x, training=True):
         """
         Given an input vector x, performs a forward pass through the neural network, returns the outputs (z) and activations (a) for each layer
         """
         z_hidden_1 = np.dot(x, self.w_hidden_1) + self.b_hidden_1
         a_hidden_1 = self.activation(z_hidden_1)
+        # Apply dropout to first hidden layer
+        a_hidden_1, self.mask1 = self.forward_dropout(a_hidden_1, training=training)
 
         z_hidden_2 = np.dot(a_hidden_1, self.w_hidden_2) + self.b_hidden_2
         a_hidden_2 = self.activation(z_hidden_2)
+        # Apply dropout to second hidden layer
+        a_hidden_2, self.mask2 = self.forward_dropout(a_hidden_2, training=training)
 
         z_output = np.dot(a_hidden_2, self.w_output) + self.b_output
         a_output = self.output_transform(z_output)
 
         return z_hidden_1, a_hidden_1, z_hidden_2, a_hidden_2, z_output, a_output
 
+    def forward_dropout(self, a_input, training=True):
+        """
+        Applies dropout to the activation 'a_input'.
+        dropout_rate=0.5 means we drop 50% of the neurons (elements).
+        If not in training mode, returns 'a_input' unchanged.
+        """
+        if not training:
+            # no dropout at test time
+            return a_input, None
+
+        keep_prob = 1.0 - self.dropout_rate
+        mask = (np.random.rand(*a_input.shape) < keep_prob).astype(np.float32)
+        a_dropped = (a_input * mask) / keep_prob
+        return a_dropped, mask
+
+
     def backward(self, x, y, z_hidden_1, a_hidden_1, z_hidden_2, a_hidden_2, z_output, a_output):
         """
-        Perorms a backwards propagation through the neural network, updating the weights for a given loss
+        Perorms a backwards propagation through the neural network, updating the weights for a given loss. Includes momentum calculations
         """
+        keep_prob = 1.0 - self.dropout_rate
 
         # Delta
         delta_output = a_output - y
@@ -59,27 +87,54 @@ class Model:
         # Backprop to second hidden layer
         d_a_hidden_2 = np.dot(self.w_output, delta_output)  # shape: (h2_size,)
         delta_hidden_2 = d_a_hidden_2 * self.activation_prime(z_hidden_2)
+        delta_hidden_2 = self.backward_dropout(delta_hidden_2, self.mask2, keep_prob)
+
 
         dw_hidden_2 = np.outer(a_hidden_1, delta_hidden_2)  # (h1_size, h2_size)
         db_hidden_2 = delta_hidden_2                        # (h2_size,)
 
+
         # Backprop to first hidden layer
         d_a_hidden_1 = np.dot(self.w_hidden_2, delta_hidden_2)  # shape: (h1_size,)
         delta_hidden_1 = d_a_hidden_1 * self.activation_prime(z_hidden_1)
+        delta_hidden_1 = self.backward_dropout(delta_hidden_1, self.mask1, keep_prob)
+
 
         dw_hidden_1 = np.outer(x, delta_hidden_1)  # (i_size, h1_size)
         db_hidden_1 = delta_hidden_1              # (h1_size,)
 
         # Update weights
         lr = self.learning_rate
-        self.w_output  -= lr * dw_output
-        self.b_output  -= lr * db_output
-        self.w_hidden_2 -= lr * dw_hidden_2
-        self.b_hidden_2 -= lr * db_hidden_2
-        self.w_hidden_1 -= lr * dw_hidden_1
-        self.b_hidden_1 -= lr * db_hidden_1
+        mu = self.momentum
+        
+        self.v_w_output = mu * self.v_w_output + dw_output
+        self.w_output   -= lr * self.v_w_output
+
+        self.v_b_output = mu * self.v_b_output + db_output
+        self.b_output   -= lr * self.v_b_output
+
+        # 2nd hidden
+        self.v_w_hidden_2 = mu * self.v_w_hidden_2 + dw_hidden_2
+        self.w_hidden_2   -= lr * self.v_w_hidden_2
+
+        self.v_b_hidden_2 = mu * self.v_b_hidden_2 + db_hidden_2
+        self.b_hidden_2   -= lr * self.v_b_hidden_2
+
+        # 1st hidden
+        self.v_w_hidden_1 = mu * self.v_w_hidden_1 + dw_hidden_1
+        self.w_hidden_1   -= lr * self.v_w_hidden_1
+
+        self.v_b_hidden_1 = mu * self.v_b_hidden_1 + db_hidden_1
+        self.b_hidden_1   -= lr * self.v_b_hidden_1
 
         return
+    
+
+    def backward_dropout(self, delta, mask, keep_prob):
+        """
+        Zero out the gradient for dropped neurons.
+        """
+        return (delta * mask) / keep_prob
 
     def decay_weight(self):
         """
@@ -93,39 +148,39 @@ class Model:
         self.w_hidden_2 *= decay_complement
         self.w_output *= decay_complement
 
-    def train(self, dataset, labels, epoch=50):
-        """
-        Initialises the epoch and batch training for the system
+    # def train(self, dataset, labels, epoch=50):
+    #     """
+    #     Initialises the epoch and batch training for the system
 
-        Where s in the input for the system and y is the label
-        """
-        dataset_len = len(dataset)
+    #     Where s in the input for the system and y is the label
+    #     """
+    #     dataset_len = len(dataset)
 
-        if dataset_len != len(labels):
-            print("ERROR: dataset and labels are not the same size")
-            return
+    #     if dataset_len != len(labels):
+    #         print("ERROR: dataset and labels are not the same size")
+    #         return
         
-        for e in range(epoch):
-            total_loss = 0.0
+    #     for e in range(epoch):
+    #         total_loss = 0.0
 
-            for i in range(dataset_len):
-                x = dataset[i]
-                y = labels[i]
-                # print(x, y)
+    #         for i in range(dataset_len):
+    #             x = dataset[i]
+    #             y = labels[i]
+    #             # print(x, y)
         
-                z_hidden_1, a_hidden_1, z_hidden_2, a_hidden_2, z_output, a_output = self.forward(x)
+    #             z_hidden_1, a_hidden_1, z_hidden_2, a_hidden_2, z_output, a_output = self.forward(x)
 
-                # Compute loss
-                loss_val = self.error(y, a_output)
-                # print(y, a_output)
+    #             # Compute loss
+    #             loss_val = self.error(y, a_output)
+    #             # print(y, a_output)
 
-                total_loss += loss_val
+    #             total_loss += loss_val
 
-                self.backward(x, y, z_hidden_1, a_hidden_1, z_hidden_2, a_hidden_2, z_output, a_output)
+    #             self.backward(x, y, z_hidden_1, a_hidden_1, z_hidden_2, a_hidden_2, z_output, a_output)
 
-            self.decay_weight()
+    #         self.decay_weight()
 
-            print(f"Epoch {e+1}/{epoch}, Loss: {total_loss / dataset_len:.4f}")
+    #         print(f"Epoch {e+1}/{epoch}, Loss: {total_loss / dataset_len:.4f}")
 
     def get_parameters(self):
         return { 
@@ -134,8 +189,8 @@ class Model:
             "output_transformation": self.output_transform.__name__
         }
     
-    def predict(self, x):
-        _, _, _, _, _, a_output = self.forward(x)
+    def predict(self, x, training=True):
+        _, _, _, _, _, a_output = self.forward(x, training)
 
         max_value = np.max(a_output) 
         max_class = np.argmax(a_output)
@@ -190,7 +245,7 @@ class Model:
             x = X_test[i]
             y = labels[i]
 
-            if self.predict(x) == y:
+            if self.predict(x, training=False) == y:
                 correct += 1
 
         return correct/dataset_length
