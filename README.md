@@ -1,5 +1,27 @@
 # MLP Exploration
 
+## Installation
+After cloning the repository, and creating a virtual environment, install the following dependencies
+
+1. **Creating Virtual Environment**
+
+    To separate out the dependencies, create and activate conda virtual environment with python 3.9
+    
+    ```bash
+    conda create -n "A1_COMP4329" python=3.9 -y
+    conda activate A1_COMP4329
+2. **Install Requirements**  
+
+   Make sure you have all necessary libraries installed (e.g., numpy, pandas, etc.). Run the following command
+   ```bash
+   pip install numpy ipykernel matplotlib pandas 
+3. **Running Code**  
+
+    Open the "a1.ipynb", run each code block from start to finish to perform the experiments. 
+    
+    Alternatively, call individual functions from the run.py python file to avoid using jupyter notebook.
+
+---
 ## Overview
 This project implements a Multi-Layer Perceptron (MLP) along with a set of utility functions for data processing, cleaning, loading, and various helper functionalities. The codebase is organized into three main directories:
 1. **utils/**
@@ -54,10 +76,6 @@ This directory houses the input and output data used for training and testing th
 
 ---
 
-## Installation
-After cloning the repository, and creating a virtual environment, install the following dependencies
-
-1. **Install Requirements**  
-   Make sure you have all necessary libraries installed (e.g., numpy, pandas, etc.).  
-   ```bash
-   pip install -r requirements.txt
+## 4. `performance/`
+This directory hosts the results of the experiment in csv format, used for the report
+- {model_number}.csv
